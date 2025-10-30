@@ -1,0 +1,16 @@
+{
+  "name": "Producer Playlist Hub",
+  "short_name": "Playlist Hub",
+  "description": "An application for music producers to create and share offline-capable playlists with clients.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#14b8a6",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
