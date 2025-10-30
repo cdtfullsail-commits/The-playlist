@@ -31,7 +31,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSongsUploaded, disable
       if (file.type.startsWith('audio/')) {
         const duration = await getAudioDuration(file);
         newSongs.push({
-          id: `${file.name}-${file.size}-${Date.now()}`,
+          id: `${file.name}-${file.size}`,
           name: file.name.replace(/\.[^/.]+$/, ""),
           url: URL.createObjectURL(file),
           duration: duration,

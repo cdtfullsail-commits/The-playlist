@@ -138,10 +138,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, playlis
             </div>
             <div>
                 <div className="flex items-center justify-between">
-                    <label htmlFor="use-password" className="block text-sm font-medium text-gray-300">Password Protection</label>
+                    <span id="password-protection-label" className="text-sm font-medium text-gray-300">Password Protection</span>
                     <button 
                         role="switch"
                         aria-checked={usePassword}
+                        aria-labelledby="password-protection-label"
                         onClick={() => setUsePassword(!usePassword)}
                         className={`${usePassword ? 'bg-teal-600' : 'bg-gray-600'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-teal-500`}
                     >
@@ -149,14 +150,17 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, playlis
                     </button>
                 </div>
                 {usePassword && (
-                    <input
-                        type="password"
-                        id="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Enter a password"
-                        className="mt-2 w-full bg-gray-900 border border-gray-700 text-white rounded-md p-2 focus:ring-teal-500 focus:border-teal-500"
-                    />
+                    <>
+                        <label htmlFor="password" className="sr-only">Password</label>
+                        <input
+                            type="password"
+                            id="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Enter a password"
+                            className="mt-2 w-full bg-gray-900 border border-gray-700 text-white rounded-md p-2 focus:ring-teal-500 focus:border-teal-500"
+                        />
+                    </>
                 )}
             </div>
         </div>

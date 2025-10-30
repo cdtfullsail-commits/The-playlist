@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import type { Song, Playlist, Comment, ProducerProfile } from './types';
@@ -7,7 +8,7 @@ import {
   PlayIcon, PauseIcon, PlusIcon, TrashIcon, ShareIcon, 
   ChevronUpIcon, ChevronDownIcon, LoadingSpinnerIcon, AnalyzeIcon,
   SaveIcon, CommentIcon, ClipboardIcon, CheckIcon, LockClosedIcon,
-  UserCircleIcon, LinkIcon, ExportIcon
+  UserCircleIcon, LinkIcon, ExportIcon, EditIcon
 } from './components/Icons';
 
 const formatTime = (seconds: number) => {
@@ -16,6 +17,16 @@ const formatTime = (seconds: number) => {
   const remainingSeconds = floorSeconds % 60;
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 };
+
+interface EditFormData {
+    name?: string;
+    bpm?: string;
+    key?: string;
+    genre?: string;
+    mood?: string;
+    instrumentation?: string;
+    genreTags?: string;
+}
 
 const App: React.FC = () => {
   const [uploadedSongs, setUploadedSongs] = useState<Song[]>([]);
@@ -33,6 +44,8 @@ const App: React.FC = () => {
   const [isFeedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const [passwordProtectedPlaylist, setPasswordProtectedPlaylist] = useState<Playlist | null>(null);
   const [producerProfile, setProducerProfile] = useState<ProducerProfile>({ name: '', contactInfo: '', bio: '' });
+  const [editingSongId, setEditingSongId] = useState<string | null>(null);
+  const [editFormData, setEditFormData] = useState<EditFormData>({});
   
   const audioRef = useRef<HTMLAudioElement>(null);
   
@@ -67,12 +80,19 @@ const App: React.FC = () => {
         // Load saved playlists and producer profile from local storage
         try {
             const storedPlaylists = localStorage.getItem('producerPlaylists');
-            if (storedPlaylists) {
-                setSavedPlaylists(JSON.parse(storedPlaylists));
-            }
+            if (storedPlaylists) setSavedPlaylists(JSON.parse(storedPlaylists));
+            
             const storedProfile = localStorage.getItem('producerProfile');
-            if (storedProfile) {
-                setProducerProfile(JSON.parse(storedProfile));
+            if (storedProfile) setProducerProfile(JSON.parse(storedProfile));
+
+            const storedLibrary = localStorage.getItem('songLibrary');
+            if (storedLibrary) {
+                setUploadedSongs(JSON.parse(storedLibrary));
+            }
+            
+            const storedActivePlaylist = localStorage.getItem('activePlaylist');
+            if (storedActivePlaylist) {
+                setPlaylist(JSON.parse(storedActivePlaylist));
             }
         } catch (error) {
             console.error("Failed to load data from local storage:", error);
@@ -91,6 +111,25 @@ const App: React.FC = () => {
     }
   }, [producerProfile, isViewerMode]);
   
+  // Save current workspace (active playlist and library) to local storage
+  useEffect(() => {
+    if (!isViewerMode) {
+        try {
+            const playlistToSave = {
+                ...playlist,
+                songs: playlist.songs.map(({ file, url, ...rest }) => rest)
+            };
+            localStorage.setItem('activePlaylist', JSON.stringify(playlistToSave));
+            
+            const libraryToSave = uploadedSongs.map(({ file, url, ...rest }) => rest);
+            localStorage.setItem('songLibrary', JSON.stringify(libraryToSave));
+
+        } catch (error) {
+            console.error("Failed to save workspace to local storage:", error);
+        }
+    }
+  }, [playlist, uploadedSongs, isViewerMode]);
+
   const showNotification = (message: string) => {
     setNotification(message);
     setTimeout(() => {
@@ -224,8 +263,34 @@ const App: React.FC = () => {
   };
 
   const handleSongsUploaded = (newSongs: Song[]) => {
-    const songsToAnalyze = newSongs.map(s => ({ ...s, analyzing: true }));
-    setUploadedSongs(prev => [...prev, ...songsToAnalyze]);
+    const songMap = new Map(uploadedSongs.map(s => [s.id, s]));
+    const songsToAnalyze: Song[] = [];
+
+    newSongs.forEach(newSong => {
+        const existingSong = songMap.get(newSong.id);
+        const isNewAnalysisNeeded = !existingSong || !existingSong.bpm;
+
+        const updatedSong = { 
+            ...(existingSong || {}), 
+            ...newSong, 
+            analyzing: isNewAnalysisNeeded 
+        };
+        
+        songMap.set(newSong.id, updatedSong);
+        
+        if (isNewAnalysisNeeded) {
+            songsToAnalyze.push(updatedSong);
+        }
+    });
+    
+    const newUploadedSongs = Array.from(songMap.values());
+    setUploadedSongs(newUploadedSongs);
+
+    setPlaylist(prev => ({
+        ...prev,
+        songs: prev.songs.map(pSong => songMap.get(pSong.id) || pSong)
+    }));
+
     songsToAnalyze.forEach(analyzeTrack);
   };
 
@@ -377,6 +442,47 @@ const App: React.FC = () => {
     }
   };
 
+  const handleStartEditing = (song: Song) => {
+    setExpandedSongId(song.id); // Ensure the item is expanded
+    setEditingSongId(song.id);
+    setEditFormData({
+        name: song.name,
+        bpm: song.bpm || '',
+        key: song.key || '',
+        genre: song.genre || '',
+        mood: song.mood || '',
+        instrumentation: (song.instrumentation || []).join(', '),
+        genreTags: (song.genreTags || []).join(', '),
+    });
+  };
+
+  const handleCancelEditing = () => {
+    setEditingSongId(null);
+    setEditFormData({});
+  };
+
+  const handleSaveEditing = () => {
+    if (!editingSongId) return;
+
+    const updates: Partial<Song> = {
+        name: editFormData.name,
+        bpm: editFormData.bpm || undefined,
+        key: editFormData.key || undefined,
+        genre: editFormData.genre || undefined,
+        mood: editFormData.mood || undefined,
+        instrumentation: editFormData.instrumentation?.split(',').map(s => s.trim()).filter(Boolean) || [],
+        genreTags: editFormData.genreTags?.split(',').map(s => s.trim()).filter(Boolean) || [],
+    };
+
+    updateSongInState(editingSongId, updates);
+    handleCancelEditing();
+  };
+
+  const handleEditFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setEditFormData(prev => ({ ...prev, [name]: value }));
+  };
+
   const PasswordPromptModal: React.FC<{ playlist: Playlist, onUnlock: (playlist: Playlist) => void }> = ({ playlist, onUnlock }) => {
     const [passwordAttempt, setPasswordAttempt] = useState('');
     const [error, setError] = useState('');
@@ -410,7 +516,7 @@ const App: React.FC = () => {
                         placeholder="Enter password"
                         autoFocus
                     />
-                    {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
+                    {error && <p role="alert" className="text-red-400 text-sm mt-2">{error}</p>}
                     <button type="submit" className="mt-4 w-full bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-500 transition-colors">
                         Unlock Playlist
                     </button>
@@ -546,9 +652,11 @@ const App: React.FC = () => {
     extraControls?: React.ReactNode;
   }> = ({ song, actions, isPlaying, isCurrent, onPlayPause, extraControls }) => {
     const isExpanded = expandedSongId === song.id;
+    const isEditing = editingSongId === song.id;
+
     const handleToggleExpand = (e: React.MouseEvent<HTMLDivElement>) => {
-      // Prevent toggle when clicking on a button inside
-      if ((e.target as HTMLElement).closest('button, a, input')) return;
+      // Prevent toggle when clicking on a button inside, or if we are editing
+      if ((e.target as HTMLElement).closest('button, a, input') || isEditing) return;
       setExpandedSongId(prevId => prevId === song.id ? null : song.id)
     };
     
@@ -578,33 +686,74 @@ const App: React.FC = () => {
               <span className="text-sm text-gray-400 hidden sm:block">{formatTime(song.duration)}</span>
               {extraControls}
               {!isViewerMode && actions}
-              <button className="p-2 rounded-full hover:bg-gray-600/50" aria-label={isExpanded ? 'Collapse' : 'Expand'}>
+              <button onClick={(e) => { e.stopPropagation(); setExpandedSongId(isExpanded ? null : song.id)}} className="p-2 rounded-full hover:bg-gray-600/50" aria-label={isExpanded ? 'Collapse' : 'Expand'}>
                 {isExpanded ? <ChevronUpIcon className="w-5 h-5 text-gray-400"/> : <ChevronDownIcon className="w-5 h-5 text-gray-400"/>}
               </button>
             </div>
         </div>
         {isExpanded && (
             <div className="p-4 bg-gray-900/30 border-t border-gray-700/50">
-                {!song.analyzing ? (
+                {isEditing ? (
+                  <div className="space-y-3 text-sm">
+                      <div>
+                          <label htmlFor={`name-${song.id}`} className="block font-medium text-gray-400 mb-1">Track Name</label>
+                          <input type="text" id={`name-${song.id}`} name="name" value={editFormData.name || ''} onChange={handleEditFormChange} className="w-full bg-gray-700 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                          <div>
+                              <label htmlFor={`bpm-${song.id}`} className="block font-medium text-gray-400 mb-1">BPM</label>
+                              <input type="text" id={`bpm-${song.id}`} name="bpm" value={editFormData.bpm || ''} onChange={handleEditFormChange} className="w-full bg-gray-700 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                          </div>
+                          <div>
+                              <label htmlFor={`key-${song.id}`} className="block font-medium text-gray-400 mb-1">Key</label>
+                              <input type="text" id={`key-${song.id}`} name="key" value={editFormData.key || ''} onChange={handleEditFormChange} className="w-full bg-gray-700 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                          </div>
+                          <div>
+                              <label htmlFor={`genre-${song.id}`} className="block font-medium text-gray-400 mb-1">Genre</label>
+                              <input type="text" id={`genre-${song.id}`} name="genre" value={editFormData.genre || ''} onChange={handleEditFormChange} className="w-full bg-gray-700 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                          </div>
+                          <div>
+                              <label htmlFor={`mood-${song.id}`} className="block font-medium text-gray-400 mb-1">Mood</label>
+                              <input type="text" id={`mood-${song.id}`} name="mood" value={editFormData.mood || ''} onChange={handleEditFormChange} className="w-full bg-gray-700 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                          </div>
+                      </div>
+                      <div>
+                          <label htmlFor={`instrumentation-${song.id}`} className="block font-medium text-gray-400 mb-1">Instrumentation (comma-separated)</label>
+                          <input type="text" id={`instrumentation-${song.id}`} name="instrumentation" value={editFormData.instrumentation || ''} onChange={handleEditFormChange} className="w-full bg-gray-700 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="e.g., synth, drums, bass" />
+                      </div>
+                      <div>
+                          <label htmlFor={`genreTags-${song.id}`} className="block font-medium text-gray-400 mb-1">Genre Tags (comma-separated)</label>
+                          <input type="text" id={`genreTags-${song.id}`} name="genreTags" value={editFormData.genreTags || ''} onChange={handleEditFormChange} className="w-full bg-gray-700 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="e.g., trap, lo-fi, chill" />
+                      </div>
+                      <div className="flex justify-end gap-2 pt-2">
+                          <button onClick={handleCancelEditing} className="px-3 py-1.5 bg-gray-600 rounded-md hover:bg-gray-500">Cancel</button>
+                          <button onClick={handleSaveEditing} className="px-3 py-1.5 bg-teal-600 rounded-md hover:bg-teal-500">Save Changes</button>
+                      </div>
+                  </div>
+                ) : (
                   <>
-                    {(song.mood || (song.instrumentation && song.instrumentation.length > 0)) && (
-                        <div className="flex items-center gap-2 flex-wrap mb-2">
-                            {song.mood && <span className="text-xs bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded-full">{song.mood}</span>}
-                            {song.instrumentation && song.instrumentation.map(inst => (
-                                <span key={inst} className="text-xs bg-indigo-900/50 text-indigo-300 px-2 py-0.5 rounded-full">{inst}</span>
-                            ))}
-                        </div>
-                    )}
-                    {song.genreTags && song.genreTags.length > 0 && (
-                        <div className="flex items-center gap-2 flex-wrap">
-                            {song.genreTags.map(tag => (
-                                <span key={tag} className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">{`#${tag}`}</span>
-                            ))}
-                        </div>
-                    )}
-                    {isViewerMode && <CommentSection song={song} onAddComment={handleAddComment} />}
+                    {!song.analyzing ? (
+                      <>
+                        {(song.mood || (song.instrumentation && song.instrumentation.length > 0)) && (
+                            <div className="flex items-center gap-2 flex-wrap mb-2">
+                                {song.mood && <span className="text-xs bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded-full">{song.mood}</span>}
+                                {song.instrumentation && song.instrumentation.map(inst => (
+                                    <span key={inst} className="text-xs bg-indigo-900/50 text-indigo-300 px-2 py-0.5 rounded-full">{inst}</span>
+                                ))}
+                            </div>
+                        )}
+                        {song.genreTags && song.genreTags.length > 0 && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {song.genreTags.map(tag => (
+                                    <span key={tag} className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">{`#${tag}`}</span>
+                                ))}
+                            </div>
+                        )}
+                        {isViewerMode && <CommentSection song={song} onAddComment={handleAddComment} />}
+                      </>
+                    ) : <p className="text-sm text-gray-400">Analyzing track details...</p>}
                   </>
-                ) : <p className="text-sm text-gray-400">Analyzing track details...</p>}
+                )}
             </div>
         )}
       </div>
@@ -670,6 +819,9 @@ const App: React.FC = () => {
                     key={song.id} song={song} isPlaying={isPlaying} isCurrent={currentSong?.id === song.id}
                     onPlayPause={handlePlayPause}
                     actions={<>
+                      <button onClick={() => handleStartEditing(song)} className="p-2 rounded-full hover:bg-gray-600" title="Edit metadata">
+                          <EditIcon className="w-5 h-5 text-gray-400 hover:text-teal-300"/>
+                      </button>
                       {!song.analyzing && (
                         <button onClick={() => handleManualAnalysis(song)} className="p-2 rounded-full hover:bg-gray-600" title={song.bpm ? "Re-analyze track" : "Analyze track"}>
                             <AnalyzeIcon className="w-5 h-5 text-gray-400 hover:text-teal-300"/>
@@ -736,10 +888,15 @@ const App: React.FC = () => {
               {playlist.songs.length > 0 ? playlist.songs.map((song, index) => (
                 <SongItem
                   key={song.id} song={song} isPlaying={isPlaying} isCurrent={currentSong?.id === song.id} onPlayPause={handlePlayPause}
-                  actions={
-                    <button onClick={() => removeSongFromPlaylist(song.id)} className="p-2 rounded-full hover:bg-gray-600" title="Remove from playlist">
-                      <TrashIcon className="w-5 h-5 text-gray-400 hover:text-red-400"/>
-                    </button>
+                  actions={!isViewerMode ?
+                    <>
+                      <button onClick={() => handleStartEditing(song)} className="p-2 rounded-full hover:bg-gray-600" title="Edit metadata">
+                          <EditIcon className="w-5 h-5 text-gray-400 hover:text-teal-300"/>
+                      </button>
+                      <button onClick={() => removeSongFromPlaylist(song.id)} className="p-2 rounded-full hover:bg-gray-600" title="Remove from playlist">
+                        <TrashIcon className="w-5 h-5 text-gray-400 hover:text-red-400"/>
+                      </button>
+                    </> : undefined
                   }
                   extraControls={!isViewerMode ? (
                     <>
